@@ -26,7 +26,7 @@ Give it your workload and hardware specs. It computes how many brokers you need 
 | File | Description |
 |---|---|
 | `kafka-cluster-sizer.html` | Interactive calculator (v1.3 · April 2026) |
-| `kafka-sizing-guide-review.pdf` | Companion guide — walks through every variable and the math, written as a story not a spec sheet |
+| `kafka-sizing-guide.pdf` | Companion guide — walks through every variable and the math, written as a story not a spec sheet |
 
 ## Usage in production
 
