@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kafka Cluster Sizer</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f0f0ed;
+    --surface: #ffffff;
+    --surface2: #f5f5f2;
+    --border: rgba(0,0,0,0.08);
+    --border-accent: rgba(15,110,86,0.25);
+    --text: #1a1a18;
+    --muted: #6b7280;
+    --accent: #0f6e56;
+    --accent2: #b45309;
+    --accent3: #4338ca;
+    --danger: #dc2626;
+    --warn: #d97706;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  /* Subtle grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .layout {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 4rem;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 2.5rem;
+    gap: 1rem;
+  }
+  .logo-mark {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-icon svg { width: 20px; height: 20px; }
+  .logo-icon svg rect { fill: #ffffff; }
+  h1 {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  h1 span { color: var(--accent); }
+  .subtitle {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+    margin-top: 2px;
+  }
+  .version-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--surface2);
+    border: 0.5px solid var(--border);
+    color: var(--muted);
+    padding: 4px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  /* Preset tabs */
+  .preset-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 1.75rem;
+    flex-wrap: wrap;
+  }
+  .preset-btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 0.5px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .preset-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .preset-btn.active {
+    background: rgba(99,202,183,0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  /* Main grid */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 1.25rem;
+    align-items: start;
+  }
+
+  @media (max-width: 800px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Panels */
+  .panel {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .panel + .panel { margin-top: 1.25rem; }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-title::after {
+    content: '';
+    flex: 1;
+    height: 0.5px;
+    background: var(--border);
+  }
+
+  /* Sliders */
+  .slider-group { margin-bottom: 1.1rem; }
+  .slider-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .slider-name {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .slider-val {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    min-width: 90px;
+    text-align: right;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 3px;
+    background: #d1d5db;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    cursor: pointer;
+  }
+
+  /* Results panel */
+  .results-panel {
+    position: sticky;
+    top: 1.5rem;
+  }
+
+  /* Big number */
+  .broker-display {
+    text-align: center;
+    padding: 1.75rem 1rem;
+    background: var(--surface2);
+    border-radius: 10px;
+    margin-bottom: 1.25rem;
+    border: 0.5px solid var(--border-accent);
+  }
+  .broker-num {
+    font-family: var(--mono);
+    font-size: 64px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+  .broker-label {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .constraint-tag {
+    display: inline-block;
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: rgba(15,110,86,0.1);
+    color: var(--accent);
+    border: 0.5px solid rgba(15,110,86,0.3);
+  }
+
+  /* Metric rows */
+  .metric-list { display: flex; flex-direction: column; gap: 2px; }
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 8px 10px;
+    border-radius: 6px;
+    transition: background 0.1s;
+  }
+  .metric-row:hover { background: var(--surface2); }
+  .metric-key {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .metric-v {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .metric-v.accent { color: var(--accent); }
+  .metric-v.warn { color: var(--warn); }
+  .metric-v.danger { color: var(--danger); }
+
+  /* Mini metric cards */
+  .mini-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 1.25rem;
+  }
+  .mini-card {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 10px 12px;
+    border: 0.5px solid var(--border);
+  }
+  .mini-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .mini-val { font-family: var(--mono); font-size: 15px; font-weight: 500; color: var(--text); }
+
+  /* Complexity bar */
+  .complexity-wrap { margin-top: 1.25rem; }
+  .complexity-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .complexity-bar-bg {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .complexity-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease, background 0.4s ease;
+  }
+
+  /* Notes box */
+  .notes-box {
+    background: rgba(15,110,86,0.06);
+    border: 0.5px solid rgba(15,110,86,0.2);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-top: 1.25rem;
+    font-size: 12px;
+    color: #065f46;
+    line-height: 1.7;
+    font-family: var(--mono);
+  }
+  .notes-box strong { color: var(--accent); }
+
+  /* Footer */
+  footer {
+    margin-top: 3rem;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <header>
+    <div class="logo-mark">
+      <div class="logo-icon">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="8" width="3" height="9" rx="1" fill="#0d0f12"/>
+          <rect x="8.5" y="4" width="3" height="13" rx="1" fill="#0d0f12"/>
+          <rect x="14" y="6" width="3" height="11" rx="1" fill="#0d0f12"/>
+        </svg>
+      </div>
+      <div>
+        <h1><span>kafka</span>-sizer</h1>
+        <div class="subtitle">cluster capacity calculator</div>
+      </div>
+    </div>
+    <span class="version-badge">v1.3 · April 2026</span>
+  </header>
+
+
+  <div id="preset-desc" style="font-size:12px; color:var(--muted); font-family:var(--mono); margin-bottom:1.5rem; padding:8px 12px; background:var(--surface); border-radius:6px; border:0.5px solid var(--border);">
+    10T msgs/day · 510 B each · typical event streaming (clickstream, metrics, transactions)
+  </div>
+
+  <div class="main-grid">
+
+    <!-- Left: inputs -->
+    <div>
+      <div class="panel">
+        <div class="panel-title">Workload</div>
+
+        <div class="slider-group">
+          <div class="slider-header" style="align-items:center;">
+            <span class="slider-name">Message size</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="display:flex;border:0.5px solid var(--border);border-radius:6px;overflow:hidden;font-family:var(--mono);font-size:11px;">
+                <button id="size-iot" onclick="setMsgSize(40,this)" style="padding:3px 9px;border:none;background:var(--surface2);color:var(--muted);cursor:pointer;transition:all 0.1s;">IoT</button>
+                <button id="size-msg" onclick="setMsgSize(510,this)" style="padding:3px 9px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:500;border-left:0.5px solid var(--border);border-right:0.5px solid var(--border);transition:all 0.1s;">Msg</button>
+                <button id="size-log" onclick="setMsgSize(4090,this)" style="padding:3px 9px;border:none;background:var(--surface2);color:var(--muted);cursor:pointer;transition:all 0.1s;">Log</button>
+              </div>
+              <span class="slider-val" id="msgSize-out">510 B</span>
+            </div>
+          </div>
+          <input type="range" id="msgSize" min="10" max="4090" step="10" value="510" oninput="onMsgSizeSlide()">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px;">
+            <span>10 B</span><span>IoT ~40 B</span><span>Msg ~510 B</span><span>Log ~4 KB</span>
+          </div>
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header" style="align-items:center;">
+            <span class="slider-name">Messages per day</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div id="unit-toggle" style="display:flex;border:0.5px solid var(--border);border-radius:6px;overflow:hidden;font-family:var(--mono);font-size:11px;">
+                <button onclick="setUnit('M',this)" style="padding:3px 9px;border:none;background:var(--surface2);color:var(--muted);cursor:pointer;transition:all 0.1s;">M</button>
+                <button onclick="setUnit('B',this)" style="padding:3px 9px;border:none;background:var(--surface2);color:var(--muted);cursor:pointer;border-left:0.5px solid var(--border);border-right:0.5px solid var(--border);transition:all 0.1s;">B</button>
+                <button onclick="setUnit('T',this)" style="padding:3px 9px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:500;transition:all 0.1s;">T</button>
+              </div>
+              <span class="slider-val" id="msgT-out">10T</span>
+            </div>
+          </div>
+          <input type="range" id="msgT" min="1" max="100" step="1" value="10" oninput="calc()">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px;">
+            <span id="slider-min-label">1T</span><span id="slider-max-label">100T</span>
+          </div>
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Peak multiplier (vs avg)</span>
+            <span class="slider-val" id="peakMult-out">3×</span>
+          </div>
+          <input type="range" id="peakMult" min="1.5" max="8" step="0.5" value="3" oninput="calc()">
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Consumer fan-out</span>
+            <span class="slider-val" id="fanout-out">2×</span>
+          </div>
+          <input type="range" id="fanout" min="1" max="10" step="1" value="2" oninput="calc()">
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Retention & Replication</div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Retention window</span>
+            <span class="slider-val" id="retentionH-out">24 h</span>
+          </div>
+          <input type="range" id="retentionH" min="1" max="168" step="1" value="24" oninput="calc()">
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Replication factor</span>
+            <span class="slider-val" id="rf-out">3</span>
+          </div>
+          <input type="range" id="rf" min="2" max="5" step="1" value="3" oninput="calc()">
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Hardware</div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Broker NIC bandwidth</span>
+            <span class="slider-val" id="nicGbps-out">25 Gbps</span>
+          </div>
+          <input type="range" id="nicGbps" min="10" max="100" step="10" value="25" oninput="calc()">
+          <div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px;">Default: kafka.m5.2xlarge = 25 Gbps NIC</div>
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Broker usable disk</span>
+            <span class="slider-val" id="diskTB-out">12 TB</span>
+          </div>
+          <input type="range" id="diskTB" min="2" max="96" step="2" value="12" oninput="calc()">
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Target broker utilization</span>
+            <span class="slider-val" id="utilPct-out">60%</span>
+          </div>
+          <input type="range" id="utilPct" min="30" max="80" step="5" value="60" oninput="calc()">
+          <div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px;">AWS recommends ≤ 60% — leaves headroom for rebalancing &amp; upgrades</div>
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="slider-name">Partitions per broker</span>
+            <span class="slider-val" id="partPerBroker-out">2,000</span>
+          </div>
+          <input type="range" id="partPerBroker" min="300" max="4000" step="100" value="2000" oninput="calc()">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px;">
+            <span>300 (t3.small)</span><span>2,000 (m5.2xl) ★</span><span>4,000 (m5.4xl+)</span>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:0.75rem;">
+          <div style="font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;background:#f0fdf4;border:0.5px solid #9fe1cb;color:#374151;">
+            MSK instance picker &nbsp;<span style="color:#0f6e56;font-weight:700;">· coming next</span>
+          </div>
+          <div style="font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;background:#f0fdf4;border:0.5px solid #9fe1cb;color:#374151;">
+            GCP Managed Kafka &nbsp;<span style="color:#0f6e56;font-weight:700;">· coming next</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: results -->
+    <div class="results-panel">
+      <div class="panel">
+        <div class="panel-title">Cluster size</div>
+
+        <div class="broker-display">
+          <div class="broker-num" id="broker-num">—</div>
+          <div class="broker-label">Brokers required</div>
+          <div class="constraint-tag" id="constraint-tag">calculating...</div>
+        </div>
+
+        <div class="mini-grid">
+          <div class="mini-card">
+            <div class="mini-label">Partitions</div>
+            <div class="mini-val" id="r-partitions">—</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Controllers</div>
+            <div class="mini-val" id="r-controllers">—</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Avg ingest</div>
+            <div class="mini-val" id="r-avg-ingest">—</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Peak ingest</div>
+            <div class="mini-val" id="r-peak-ingest">—</div>
+          </div>
+        </div>
+
+        <div class="panel-title">Breakdown</div>
+        <div class="metric-list">
+          <div class="metric-row"><span class="metric-key">Msgs / second (avg)</span><span class="metric-v" id="r-mps">—</span></div>
+          <div class="metric-row"><span class="metric-key">Msgs / second (peak)</span><span class="metric-v" id="r-mps-peak">—</span></div>
+          <div class="metric-row"><span class="metric-key">Total retention data</span><span class="metric-v accent" id="r-retention">—</span></div>
+          <div class="metric-row"><span class="metric-key">Network-bound brokers</span><span class="metric-v" id="r-net">—</span></div>
+          <div class="metric-row"><span class="metric-key">Disk-bound brokers</span><span class="metric-v" id="r-disk">—</span></div>
+          <div class="metric-row"><span class="metric-key">Replication traffic / broker</span><span class="metric-v" id="r-repl">—</span></div>
+        </div>
+
+        <div class="complexity-wrap">
+          <div class="complexity-header">
+            <span>Operational complexity</span>
+            <span id="r-complexity-label">—</span>
+          </div>
+          <div class="complexity-bar-bg">
+            <div class="complexity-bar-fill" id="r-complexity-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="notes-box" id="r-notes">
+          Adjust sliders to see recommendations.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    kafka-sizer · built for large-scale streaming infrastructure design ·
+    <a href="https://kafka.apache.org/documentation/" target="_blank">kafka docs ↗</a>
+  </footer>
+</div>
+
+<script>
+function fmtBytes(b) {
+  if (b >= 1e15) return (b/1e15).toFixed(1) + ' PB';
+  if (b >= 1e12) return (b/1e12).toFixed(1) + ' TB';
+  if (b >= 1e9)  return (b/1e9).toFixed(1)  + ' GB';
+  if (b >= 1e6)  return (b/1e6).toFixed(1)  + ' MB';
+  return Math.round(b) + ' B';
+}
+function fmtBW(bps) {
+  if (bps >= 1e12) return (bps/1e12).toFixed(1) + ' Tbps';
+  if (bps >= 1e9)  return (bps/1e9).toFixed(2)  + ' Gbps';
+  if (bps >= 1e6)  return (bps/1e6).toFixed(1)  + ' Mbps';
+  return Math.round(bps) + ' bps';
+}
+function fmt(n) {
+  if (n >= 1e12) return (n/1e12).toFixed(1) + 'T';
+  if (n >= 1e9)  return (n/1e9).toFixed(1)  + 'B';
+  if (n >= 1e6)  return (n/1e6).toFixed(1)  + 'M';
+  if (n >= 1e3)  return (n/1e3).toFixed(1)  + 'K';
+  return Math.round(n).toString();
+}
+function get(id) { return parseFloat(document.getElementById(id).value); }
+function set$(id, val, cls) {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  if (cls) { el.className = 'metric-v ' + cls; }
+}
+
+// Unit state: M = millions, B = billions, T = trillions
+let currentUnit = 'T';
+const unitMult  = { M: 1e6, B: 1e9, T: 1e12 };
+const unitRanges = {
+  M: { min: 100,  max: 999,  step: 50,  def: 500  },
+  B: { min: 1,    max: 999,  step: 1,   def: 10   },
+  T: { min: 1,    max: 100,  step: 1,   def: 10   },
+};
+
+function setUnit(u, btn) {
+  currentUnit = u;
+  // update toggle button styles
+  document.querySelectorAll('#unit-toggle button').forEach(b => {
+    b.style.background = 'var(--surface2)';
+    b.style.color = 'var(--muted)';
+    b.style.fontWeight = '400';
+  });
+  btn.style.background = 'var(--accent)';
+  btn.style.color = '#fff';
+  btn.style.fontWeight = '500';
+
+  const r = unitRanges[u];
+  const slider = document.getElementById('msgT');
+  slider.min   = r.min;
+  slider.max   = r.max;
+  slider.step  = r.step;
+  slider.value = r.def;
+  document.getElementById('slider-min-label').textContent = r.min + u;
+  document.getElementById('slider-max-label').textContent = r.max + u;
+  calc();
+}
+
+const sizePresetBtns = { 40: 'size-iot', 510: 'size-msg', 4090: 'size-log' };
+
+function setMsgSize(bytes, btn) {
+  document.getElementById('msgSize').value = bytes;
+  highlightSizeBtn(bytes);
+  calc();
+}
+
+function highlightSizeBtn(val) {
+  ['size-iot','size-msg','size-log'].forEach(id => {
+    const b = document.getElementById(id);
+    b.style.background = 'var(--surface2)';
+    b.style.color = 'var(--muted)';
+    b.style.fontWeight = '400';
+  });
+  const match = sizePresetBtns[parseInt(val)];
+  if (match) {
+    const b = document.getElementById(match);
+    b.style.background = 'var(--accent)';
+    b.style.color = '#fff';
+    b.style.fontWeight = '500';
+  }
+}
+
+function onMsgSizeSlide() {
+  highlightSizeBtn(document.getElementById('msgSize').value);
+  calc();
+}
+
+function calc() {
+  const sliderVal  = get('msgT');
+  const msgsPerDay = sliderVal * unitMult[currentUnit];
+
+  const msgSize   = get('msgSize');
+  const peakMult  = get('peakMult');
+  const retentionH= get('retentionH');
+  const rf        = get('rf');
+  const utilPct   = get('utilPct') / 100;
+  const nicGbps   = get('nicGbps');
+  const diskTB    = get('diskTB');
+  const fanout    = get('fanout');
+  const partPerBroker = get('partPerBroker');
+
+  // Update display values
+  document.getElementById('msgT-out').textContent     = sliderVal + currentUnit + ' / day';
+  document.getElementById('msgSize-out').textContent  = msgSize < 1024 ? msgSize + ' B' : (msgSize/1024).toFixed(1) + ' KB';
+  document.getElementById('peakMult-out').textContent = peakMult + '×';
+  document.getElementById('fanout-out').textContent   = fanout + '× consumers';
+  document.getElementById('retentionH-out').textContent = retentionH < 24 ? retentionH + ' h' : (retentionH/24).toFixed(0) + 'd';
+  document.getElementById('rf-out').textContent       = rf;
+  document.getElementById('nicGbps-out').textContent  = nicGbps + ' Gbps';
+  document.getElementById('diskTB-out').textContent   = diskTB + ' TB';
+  document.getElementById('utilPct-out').textContent  = Math.round(utilPct*100) + '%';
+  document.getElementById('partPerBroker-out').textContent = partPerBroker.toLocaleString();
+
+  // Core math (all internal in raw counts/bytes)
+  const msgsPerSec      = msgsPerDay / 86400;
+  const peakMps         = msgsPerSec * peakMult;
+  const avgIngressBps   = msgsPerSec * msgSize * 8;
+  const peakIngressBps  = peakMps * msgSize * 8;
+  const peakWithRF      = peakIngressBps * rf;
+  const egressBps       = peakIngressBps * fanout;
+  const retentionBytes  = msgsPerSec * msgSize * retentionH * 3600 * rf;
+
+  const nicBps          = nicGbps * 1e9;
+  const effectiveNic    = nicBps * utilPct;
+
+  const brokersByNet    = Math.ceil(peakWithRF / effectiveNic);
+  const brokersByDisk   = Math.ceil(retentionBytes / (diskTB * 1e12));
+  const brokersByEgress = Math.ceil((peakWithRF + egressBps) / effectiveNic);
+  const rawBrokers      = Math.max(brokersByNet, brokersByDisk, brokersByEgress, 3);
+  const brokers         = Math.ceil(rawBrokers / 3) * 3;
+  const partitions      = brokers * partPerBroker;
+  const controllers     = brokers < 50 ? 3 : 5;
+
+  let constraintBy = 'network ingress';
+  if (rawBrokers === brokersByDisk && brokersByDisk >= brokersByNet && brokersByDisk >= brokersByEgress)
+    constraintBy = 'disk retention';
+  else if (rawBrokers === brokersByEgress && brokersByEgress > brokersByNet)
+    constraintBy = 'network (in + egress)';
+
+  const replPerBroker = peakWithRF / brokers;
+
+  const complexityScore = Math.min(100, Math.round((brokers / 300) * 100));
+  let complexityLabel, complexityColor, complexityText;
+  if (brokers <= 20) {
+    complexityLabel = 'manageable'; complexityColor = '#0f6e56'; complexityText =
+      '<strong>Manageable cluster.</strong> Standard Kafka ops practices apply. Consider MSK or Confluent Cloud to reduce ops burden.';
+  } else if (brokers <= 60) {
+    complexityLabel = 'moderate'; complexityColor = '#b45309'; complexityText =
+      '<strong>Moderate complexity.</strong> Invest in Cruise Control for partition rebalancing. KRaft mode strongly recommended. Tiered Storage can cut broker count ~3-5×.';
+  } else if (brokers <= 150) {
+    complexityLabel = 'high'; complexityColor = '#c2410c'; complexityText =
+      '<strong>High complexity.</strong> You\'re in hyperscaler territory. Tiered Storage (S3-backed) is non-negotiable. Dedicated ops team needed. Consider Warpstream or Responsive.io for stateless brokers.';
+  } else {
+    complexityLabel = 'extreme'; complexityColor = '#dc2626'; complexityText =
+      '<strong>Extreme scale.</strong> Only a handful of companies run clusters this size. Custom broker tuning, dedicated infra team, and likely a fork or replacement (Pulsar, Warpstream) warranted.';
+  }
+
+  document.getElementById('broker-num').textContent = brokers.toLocaleString();
+  document.getElementById('constraint-tag').textContent = 'constrained by ' + constraintBy;
+  document.getElementById('r-partitions').textContent = partitions.toLocaleString();
+  const ctrlNote = brokers < 50 ? '3 (KRaft default)' : '5 (KRaft — 2-failure tolerance)';
+  document.getElementById('r-controllers').textContent = ctrlNote;
+  document.getElementById('r-avg-ingest').textContent = fmtBW(avgIngressBps);
+  document.getElementById('r-peak-ingest').textContent = fmtBW(peakIngressBps);
+
+  set$('r-mps', fmt(msgsPerSec) + '/s');
+  set$('r-mps-peak', fmt(peakMps) + '/s');
+  set$('r-retention', fmtBytes(retentionBytes), 'accent');
+  set$('r-net', brokersByNet.toLocaleString());
+  set$('r-disk', brokersByDisk.toLocaleString());
+  set$('r-repl', fmtBW(replPerBroker));
+
+  document.getElementById('r-complexity-label').textContent = complexityLabel;
+  const bar = document.getElementById('r-complexity-bar');
+  bar.style.width = Math.max(5, complexityScore) + '%';
+  bar.style.background = complexityColor;
+  document.getElementById('r-notes').innerHTML = complexityText;
+
+  const sizeLabel = msgSize < 1024 ? msgSize + ' B' : (msgSize/1024).toFixed(1) + ' KB';
+  document.getElementById('preset-desc').textContent =
+    sliderVal + currentUnit + ' msgs/day · ' + sizeLabel + ' each · ' + fmt(msgsPerSec) + ' msg/s avg · ' + fmtBW(avgIngressBps) + ' raw ingest';
+}
+
+// Presets store raw count in scientific notation so unit switching works cleanly
+const presets = {
+  standard: { unit:'T', sliderVal:10,  msgSize:510,  peakMult:3, retentionH:24, rf:3, utilPct:60, nicGbps:25,  diskTB:12, fanout:2,
+    desc: '10T msgs/day · 510 B each · typical event streaming (clickstream, metrics, transactions)' },
+  high:     { unit:'T', sliderVal:50,  msgSize:510,  peakMult:3, retentionH:24, rf:3, utilPct:60, nicGbps:50,  diskTB:24, fanout:3,
+    desc: '50T msgs/day · 510 B each · high-scale event bus (large ad-tech, social, payments platform)' },
+  extreme:  { unit:'T', sliderVal:100, msgSize:510,  peakMult:5, retentionH:12, rf:3, utilPct:70, nicGbps:100, diskTB:48, fanout:2,
+    desc: '100T msgs/day · 510 B each · hyperscaler-grade (think Meta-scale telemetry or network monitoring)' },
+  iot:      { unit:'B', sliderVal:30,  msgSize:40,   peakMult:4, retentionH:6,  rf:3, utilPct:65, nicGbps:25,  diskTB:8,  fanout:4,
+    desc: '30B msgs/day · 40 B each · millions of sensors sending tiny heartbeat/telemetry payloads every few seconds' },
+  logs:     { unit:'B', sliderVal:5,   msgSize:4090, peakMult:2, retentionH:72, rf:2, utilPct:55, nicGbps:25,  diskTB:24, fanout:2,
+    desc: '5B msgs/day · 4090 B each · application log lines; fewer messages but large payloads, long retention for replay' },
+};
+
+function setPreset(p, btn) {
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const v = presets[p]; if (!v) return;
+
+  const unitBtn = [...document.querySelectorAll('#unit-toggle button')].find(b => b.textContent === v.unit);
+  if (unitBtn) setUnit(v.unit, unitBtn);
+
+  document.getElementById('msgT').value = v.sliderVal;
+  ['msgSize','peakMult','retentionH','rf','utilPct','nicGbps','diskTB','fanout'].forEach(k => {
+    const el = document.getElementById(k);
+    if (el) el.value = v[k];
+  });
+  highlightSizeBtn(v.msgSize);
+  document.getElementById('preset-desc').textContent = v.desc;
+  calc();
+}
+
+calc();
+</script>
+</body>
+</html>
