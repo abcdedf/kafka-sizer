@@ -1,6 +1,8 @@
 # kafka-sizer
 
-An interactive Kafka cluster capacity calculator. Open the `.html` file in any browser — no sign-up, no install.
+An interactive Kafka cluster capacity calculator. No sign-up. No install.
+
+**[Open Calculator](https://abcdedf.github.io/kafka-sizer/kafka-cluster-sizer.html)** · **[Companion PDF](https://abcdedf.github.io/kafka-sizer/kafka-sizing-guide.pdf)** · **[Companion Markdown](https://github.com/abcdedf/kafka-sizer/blob/main/kafka-sizing-guide.md)**
 
 ## What it does
 
