@@ -2,7 +2,7 @@
 
 *A practical guide to understanding the math, the tradeoffs, and the variables behind every sizing decision — told as a story.*
 
-> This guide has a companion interactive calculator — [kafka-cluster-sizer.html](./kafka-cluster-sizer.html) — that lets you dial in all nine variables and see broker count, partition recommendations, and complexity ratings update in real time. Use the guide to understand the reasoning; use the calculator to explore your specific numbers.
+> This guide has a companion interactive calculator — [kafka-cluster-sizer.html](./kafka-cluster-sizer.html) — that lets you dial in all nine variables and see broker count, partition recommendations, and complexity ratings update in real time. The defaults are set to the 2B messages/day starting point. Use the guide to understand the reasoning; use the calculator to explore your specific numbers.
 
 ---
 
@@ -19,6 +19,8 @@ The answer depends on at least **nine variables** — and getting even one of th
 ---
 
 ## The Cast of Variables
+
+Before we follow that 2B → 10B journey, meet the nine variables the calculator uses. Each one is a dial on your cluster's behavior:
 
 | Variable | What it is | Group |
 |---|---|---|
@@ -37,7 +39,7 @@ The answer depends on at least **nine variables** — and getting even one of th
 
 ## Chapter 1 — It All Starts With Bytes Per Second
 
-Kafka doesn't care about messages. It cares about **bytes**. A broker's job is to receive bytes from producers, replicate them to other brokers, and serve them to consumers. Every hardware limit — network bandwidth, disk throughput, disk capacity — is expressed in bytes.
+Here's the thing about Kafka: it doesn't care about messages. It cares about **bytes**. A broker's job is to receive bytes from producers, replicate them to other brokers, and serve them to consumers. Every hardware limit — network bandwidth, disk throughput, disk capacity — is expressed in bytes.
 
 So the first translation you need to make is from messages per day — the number your product manager gives you — into bytes per second — the number your infrastructure needs to handle.
 
@@ -47,11 +49,11 @@ So the first translation you need to make is from messages per day — the numbe
 ingress (bps) = (msgs/day / 86,400) × msg_size × 8
 ```
 
-Divide by 86,400 to convert days to seconds. Multiply by 8 to convert bytes to bits.
+Divide by 86,400 to convert days to seconds. Multiply by 8 to convert bytes to bits. This gives you the average ingress rate in bits per second — what brokers receive from producers.
 
 ### Our company at 2B messages/day
 
-2 billion messages a day, each around 510 bytes — a typical JSON event with a user ID, event type, timestamp, and a few attributes:
+Back to our mid-size SaaS company. 2 billion messages a day, each around 510 bytes — a typical JSON event with a user ID, event type, timestamp, and a few attributes. Here's what that looks like:
 
 | Step | Calculation | Result |
 |---|---|---|
@@ -78,17 +80,17 @@ At 10B/day, this still fits on 3 `kafka.m5.2xlarge` brokers. **The key insight: 
 
 ### When does it actually get hard?
 
-The inflection point for most companies is around **100B–500B messages/day** — when disk retention starts requiring more brokers than network throughput, and when consumer fan-out begins to multiply egress bandwidth meaningfully. At that scale, instance type selection, tiered storage, and partition strategy all start mattering in ways they simply don't at 2B–10B/day.
+The inflection point for most companies is around **100B–500B messages/day** — when disk retention starts requiring more brokers than network throughput, and when consumer fan-out begins to multiply egress bandwidth meaningfully. At that scale, instance type selection, tiered storage, and partition strategy all start mattering in ways they simply don't at 2B–10B/day. The chapters that follow explain exactly how each variable behaves as you cross those thresholds.
 
 ### Why message size matters more than you think
 
-Doubling your message count and doubling your message size produce the same throughput increase — but they feel very different. A team that switches from compact binary events (64 B) to verbose JSON (2 KB) has just multiplied their Kafka infrastructure cost by **30x**, with no change to message rate.
+Doubling your message count and doubling your message size produce the same throughput increase — but they feel very different. Most engineers intuitively track message volume. Fewer track payload size. A team that switches from compact binary events (64 B) to verbose JSON (2 KB) has just multiplied their Kafka infrastructure cost by **30x**, with no change to message rate.
 
 ---
 
 ## Chapter 2 — The Peak Multiplier: Sizing for Reality
 
-Traffic is never flat. E-commerce spikes at checkout time. Social platforms spike when a trending event breaks. IoT devices all phone home after a firmware push.
+Traffic is never flat. E-commerce spikes at checkout time. Social platforms spike when a trending event breaks. IoT devices all phone home after a firmware push. The peak multiplier captures this — our 10B/day company averages 472 Mbps of ingress, but at 3x peak they need to size for 1.4 Gbps. At hyperscale (say 10T/day), that same 3x multiplier turns 474 Gbps average into 1.4 Tbps peak — a fundamentally different infrastructure problem.
 
 ```
 peak_ingress = avg_ingress × peak_multiplier
@@ -104,7 +106,7 @@ This is where a lot of teams get burned. They provision for average load and dis
 
 ## Chapter 3 — Three Constraints, One Bottleneck
 
-Your cluster is always limited by whichever constraint requires the most brokers.
+Once you have your peak ingress number, you need to figure out what limits your brokers. There are exactly three constraints that drive broker count. Your cluster is always limited by whichever one requires the most brokers.
 
 **Network ingress** — Each broker has a finite NIC. At peak, the cluster must absorb `peak_ingress × RF` bits per second across all broker NICs.
 ```
@@ -126,21 +128,27 @@ The binding constraint shifts with your workload shape:
 - Large messages with long retention → **disk-bound**
 - Many downstream consumers → **egress-bound**
 
+The calculator shows you which constraint is driving your broker count so you know where to optimize.
+
 ---
 
 ## Chapter 4 — Replication: The Hidden Multiplier
 
-RF multiplies both your network load and your disk footprint. A cluster ingesting 474 Gbps with RF=3 actually moves **1.4 Tbps** internally. That's the price of fault tolerance.
+Replication factor (RF) is one of the most impactful variables in the calculator, yet it's easy to overlook. When RF=3, every message written to your cluster is actually written three times — once by the producer, twice more as the leader replicates to two follower replicas. RF multiplies both your network load and your disk footprint. A cluster ingesting 474 Gbps with RF=3 actually moves **1.4 Tbps** internally. That's the price of fault tolerance.
 
-| RF | Write availability | Network multiplier | Recommended for |
+| RF | Write availability (minISR=RF-1, acks=all) | Network multiplier | Recommended for |
 |---|---|---|---|
-| 2 | Tolerates 0 broker losses for writes | 2x | Dev/test, cost-sensitive |
-| 3 | Tolerates 1 broker loss for writes (minISR=2) | 3x | **Production standard** |
-| 4–5 | Tolerates 2+ broker losses for writes | 4–5x | Regulated / mission critical |
+| 2 | Tolerates 0 broker losses for writes; 1 for reads | 2x | Dev/test, cost-sensitive |
+| 3 | Tolerates 1 broker loss for writes (minISR=2); standard production baseline | 3x | **Production standard** |
+| 4–5 | Tolerates 2+ broker losses for writes (with minISR=RF-1) | 4–5x | Regulated / mission critical |
+
+If a broker dies, Kafka can immediately elect a follower as the new leader with no data loss.
 
 ---
 
 ## Chapter 5 — Retention: How Long Is Too Long?
+
+Kafka's killer feature compared to traditional message queues is that messages aren't deleted after consumption — they're retained on disk for a configurable window. This enables replay, late-joining consumers, and auditing. But it comes at a cost: everything you retain lives on broker disks, multiplied by RF.
 
 ```
 total_data = (msgs/sec) × msg_size × retention_secs × RF
@@ -150,24 +158,28 @@ This is the total disk footprint across your entire cluster including replicatio
 
 ### Tiered Storage: the escape hatch
 
-MSK with S3 tiered storage decouples hot broker disk from cold retention. Recent data stays on broker NVMe; older data is offloaded to S3 automatically. This can reduce broker count driven by disk by **3–10x** — and should be the first option you reach for when retention is your binding constraint.
+MSK with S3 tiered storage, and Confluent's tiered storage offering, decouple hot broker disk from cold retention. Recent data stays on broker NVMe for fast consumer reads; older data is offloaded to S3 automatically. This can reduce broker count driven by disk by **3–10x** — and should be the first option you reach for when retention is your binding constraint.
 
 ---
 
 ## Chapter 6 — Hardware Variables: What You're Actually Buying
 
+The three hardware variables — NIC bandwidth, disk size, and target utilization — translate the abstract throughput numbers into concrete broker counts.
+
 ### Broker NIC (Gbps)
-Modern broker hosts typically have 10, 25, or 100 Gbps NICs. NIC is a first-pass planning tool, but on MSK it is not the only bottleneck — EBS storage throughput and EC2 egress throughput are separate ceilings that can bind before raw NIC speed does, especially on `m5.large/xlarge` instances. Always validate against AWS's published per-instance throughput limits.
+Modern broker hosts typically have 10, 25, or 100 Gbps NICs. NIC is a first-pass planning tool, but on MSK it is not the only bottleneck — EBS storage throughput and EC2 egress throughput are separate ceilings that can bind before raw NIC speed does, especially on `m5.large/xlarge` instances. Always validate against AWS's published per-instance throughput limits. On AWS, kafka.m5.2xlarge gives you up to 25 Gbps.
 
 ### Broker disk (TB usable)
-NVMe SSDs on broker hosts typically range from 2 TB to 24 TB usable. Higher disk per broker reduces the number of brokers needed when retention is the binding constraint. Spinning disks are viable for retention-heavy workloads but hurt latency.
+NVMe SSDs on broker hosts typically range from 2 TB to 24 TB usable. Higher disk per broker reduces the number of brokers needed when retention is the binding constraint. Spinning disks are viable for retention-heavy workloads but hurt latency. On MSK, provisioned EBS throughput is only available on m5.4xlarge+ and m7g.2xlarge+ — smaller instances cap out at baseline EBS throughput.
 
 ### Target utilization (%)
-Running brokers at 80% sounds efficient — but leaves almost no headroom for rebalancing, catch-up reads, or traffic spikes. **AWS explicitly recommends keeping CPU under 60%** to preserve headroom for broker replacement, patching, and rolling upgrades. During a rolling update, one broker goes offline and the remaining brokers absorb its partition leadership — that headroom is not optional.
+Running brokers at 80% sounds efficient — but leaves almost no headroom for rebalancing, catch-up reads, or traffic spikes. **AWS explicitly recommends keeping CPU User + CPU System under 60%** to preserve headroom for broker replacement, patching, and rolling upgrades. During a rolling update, one broker goes offline and the remaining brokers absorb its partition leadership — that headroom is not optional.
 
 ---
 
 ## Chapter 7 — Three Workloads, Three Different Problems
+
+The best way to internalize these variables is to see them in action across three very different workloads — each one revealing a different binding constraint.
 
 ### IoT Sensor Fleet
 *30B msgs/day · 40 B/msg · peak 4x · fan-out 4 · 6h retention · RF=3 · 25 Gbps NIC · 8 TB disk*
@@ -183,7 +195,7 @@ Running brokers at 80% sounds efficient — but leaves almost no headroom for re
 | Brokers (disk) | ceil(898 GB / 8,000 GB) | 1 |
 
 **Result: 3 brokers (minimum for RF=3)**
-Tiny messages at moderate volume: network load is almost negligible. The binding factor is the minimum cluster size required by RF=3.
+Tiny messages at moderate volume: network load is almost negligible. The binding factor is the minimum cluster size required by RF=3. With 4 consumer groups, egress is actually the more meaningful design consideration than raw ingest throughput.
 
 ---
 
@@ -200,7 +212,7 @@ Tiny messages at moderate volume: network load is almost negligible. The binding
 | Brokers (disk) | ceil(15,300 TB / 12 TB) | 1,275 |
 
 **Result: 1,275 brokers — disk-bound**
-The network needs 284 brokers, but 24h retention at this scale requires 1,275. Tiered Storage is non-negotiable here — offloading cold data to S3 brings broker count back to ~284.
+Disk is the binding constraint by 4.5x. The network-bound figure of ~284 brokers is dwarfed by the disk requirement. 24h retention at this scale requires 1,275. Tiered Storage is non-negotiable here — offloading cold data to S3 brings broker count back to ~284.
 
 ---
 
@@ -284,31 +296,33 @@ Each additional consumer group multiplies your egress bandwidth. At high fan-out
 
 | Spec | Value | How it maps to the calculator |
 |---|---|---|
-| vCPU | 8 cores | Supports 60% utilization target |
-| Memory | 32 GB | ~1 MB heap per partition; 2,000 partitions fits comfortably |
-| Network | Up to 25 Gbps | Default NIC slider = 25 Gbps |
+| vCPU | 8 cores | Supports 60% utilization target — leaves 3+ cores for replication & rebalancing |
+| Memory | 32 GB | ~1 MB heap per partition; 2,000 partitions fits comfortably in broker JVM heap |
+| Network | Up to 25 Gbps | Default NIC slider = 25 Gbps; drives the network-bound broker count formula |
 | Partitions (AWS rec.) | 2,000 | AWS MSK official recommendation for m5.2xlarge; hard max is 3,000 |
 | Throughput / partition | ~10 MB/s | Standard broker baseline on NVMe-backed EBS (gp3) |
 | MSK storage max | 16 TB EBS | Default disk slider = 12 TB (leaving headroom below the 16 TB MSK ceiling) |
+
+The partitions/broker slider lets you adjust this for your actual instance. Smaller instances (m5.large, m7g.large) should use 1,000. Larger instances (m5.4xlarge and above) can go up to 4,000 per AWS's published limits.
 
 ---
 
 ## What's Coming in Future Versions
 
 **Phase 2 — MSK Instance Picker**
-Select your MSK broker type directly and the calculator will automatically populate NIC bandwidth, recommended partitions per broker, throughput per partition, and storage limits. Covering all sizes from `kafka.t3.small` through `kafka.m5.24xlarge` and `express.m7g.16xlarge`.
+Select your MSK broker type — Standard (M5, M7g) or Express (M7g) — and the calculator will automatically populate NIC bandwidth, recommended partitions per broker, throughput per partition, and storage limits. Covering all sizes from `kafka.t3.small` through `kafka.m5.24xlarge` and `express.m7g.16xlarge`. No more manual lookup, with sustained vs. burst throughput clearly distinguished for Express brokers.
 
 **Phase 3 — GCP Managed Kafka & Confluent Cloud**
-Switch between platforms and see how broker counts and costs compare side by side.
+Switch between platforms and see how broker counts and costs compare side by side. Each platform has different throughput limits, partition caps, and pricing models — useful for multi-cloud architecture decisions or vendor evaluations.
 
 **Phase 4 — Cost Estimation Layer**
-Monthly infrastructure cost per platform — on-demand vs. reserved pricing, MSK vs. self-managed EC2, EBS gp3 vs. Tiered Storage to S3.
+Once instance types are first-class inputs, the calculator can estimate monthly infrastructure cost per platform — on-demand vs. reserved pricing, MSK vs. self-managed EC2, EBS gp3 vs. Tiered Storage to S3. All will be surfaced directly in the tool.
 
 **Phase 5 — Consumer Parallelism & Partition Validation**
-Add consumer processing time as an input and wire up Little's Law to validate whether your partition count is sufficient for consumer parallelism, not just broker capacity.
+Add consumer processing time as an input and wire up Little's Law to validate whether your partition count is sufficient for consumer parallelism, not just broker capacity. This will integrate topicpartitions.com's approach into the same tool, giving a complete picture from both the infrastructure and application sides.
 
 ---
 
-*Found something wrong or have ideas? Open an issue or start a discussion at [github.com/abcdedf/kafka-sizer](https://github.com/abcdedf/kafka-sizer/discussions).*
+Did the calculator match your real cluster? Were any variables missing? Was the math off for your workload? Your feedback makes this better for everyone. Open an issue or start a discussion at [github.com/abcdedf/kafka-sizer](https://github.com/abcdedf/kafka-sizer/discussions), or reach out directly. Every real-world data point improves the model.
 
 *kafka-cluster-sizer · companion interactive calculator · v1.3 · April 2026*
